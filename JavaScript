@@ -1,0 +1,527 @@
+document.addEventListener('DOMContentLoaded', function() {
+    // DOM Elements
+    const elements = {
+        // File selection
+        dropZone: document.getElementById('dropZone'),
+        fileInput: document.getElementById('fileInput'),
+        selectFileBtn: document.getElementById('selectFileBtn'),
+        
+        // Preview
+        previewImage: document.getElementById('previewImage'),
+        emptyState: document.querySelector('.empty-state'),
+        resetBtn: document.getElementById('resetBtn'),
+        convertBtn: document.getElementById('convertBtn'),
+        
+        // Format options
+        formatRadios: document.querySelectorAll('input[name="format"]'),
+        qualitySlider: document.getElementById('quality'),
+        qualityValue: document.getElementById('qualityValue'),
+        preserveExif: document.getElementById('preserveExif'),
+        
+        // Size options
+        widthInput: document.getElementById('width'),
+        heightInput: document.getElementById('height'),
+        maintainAspect: document.getElementById('maintainAspect'),
+        scaleSlider: document.getElementById('scale'),
+        scaleValue: document.getElementById('scaleValue'),
+        cropToggle: document.getElementById('cropToggle'),
+        
+        // Crop controls
+        cropContainer: document.getElementById('cropContainer'),
+        cropPreview: document.getElementById('cropPreview'),
+        aspectRadios: document.querySelectorAll('input[name="aspectRatio"]'),
+        applyCropBtn: document.getElementById('applyCropBtn'),
+        cancelCropBtn: document.getElementById('cancelCropBtn'),
+        
+        // Enhancements
+        autoEnhance: document.getElementById('autoEnhance'),
+        styleSelect: document.getElementById('style'),
+        removeBg: document.getElementById('removeBg'),
+        upscale: document.getElementById('upscale'),
+        
+        // Color adjustments
+        brightnessSlider: document.getElementById('brightness'),
+        brightnessValue: document.getElementById('brightnessValue'),
+        contrastSlider: document.getElementById('contrast'),
+        contrastValue: document.getElementById('contrastValue'),
+        saturationSlider: document.getElementById('saturation'),
+        saturationValue: document.getElementById('saturationValue'),
+        sharpnessSlider: document.getElementById('sharpness'),
+        sharpnessValue: document.getElementById('sharpnessValue'),
+        
+        // Modals
+        processingModal: document.getElementById('processingModal'),
+        progressBar: document.getElementById('progressBar'),
+        progressText: document.getElementById('progressText'),
+        cancelProcessingBtn: document.getElementById('cancelProcessingBtn'),
+        downloadModal: document.getElementById('downloadModal'),
+        resultImage: document.getElementById('resultImage'),
+        fileFormat: document.getElementById('fileFormat'),
+        fileSize: document.getElementById('fileSize'),
+        fileDimensions: document.getElementById('fileDimensions'),
+        downloadBtn: document.getElementById('downloadBtn'),
+        newConversionBtn: document.getElementById('newConversionBtn'),
+        closeModalBtn: document.getElementById('closeModalBtn'),
+        
+        // Theme toggle
+        themeToggle: document.getElementById('themeToggle'),
+        
+        // Other
+        privacyLink: document.getElementById('privacyLink')
+    };
+
+    // App state
+    const state = {
+        originalImage: null,
+        processedImage: null,
+        currentImage: null,
+        isProcessing: false,
+        cropState: {
+            active: false,
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+            ratio: 1
+        },
+        aspectRatioLocked: true,
+        lastAspectRatio: 1,
+        originalDimensions: { width: 0, height: 0 },
+        theme: localStorage.getItem('theme') || 'light'
+    };
+
+    // Initialize the app
+    init();
+
+    function init() {
+        setupEventListeners();
+        applyTheme();
+        elements.convertBtn.disabled = true;
+    }
+
+    function setupEventListeners() {
+        // File selection
+        elements.selectFileBtn.addEventListener('click', () => elements.fileInput.click());
+        elements.fileInput.addEventListener('change', handleFileSelect);
+        
+        // Drag and drop
+        elements.dropZone.addEventListener('dragover', handleDragOver);
+        elements.dropZone.addEventListener('dragleave', handleDragLeave);
+        elements.dropZone.addEventListener('drop', handleDrop);
+        
+        // Buttons
+        elements.resetBtn.addEventListener('click', resetImage);
+        elements.convertBtn.addEventListener('click', processImage);
+        elements.downloadBtn.addEventListener('click', downloadImage);
+        elements.newConversionBtn.addEventListener('click', resetAfterConversion);
+        elements.closeModalBtn.addEventListener('click', () => elements.downloadModal.classList.remove('active'));
+        elements.cancelProcessingBtn.addEventListener('click', cancelProcessing);
+        
+        // Crop controls
+        elements.cropToggle.addEventListener('change', toggleCropMode);
+        elements.applyCropBtn.addEventListener('click', applyCrop);
+        elements.cancelCropBtn.addEventListener('click', cancelCrop);
+        elements.aspectRadios.forEach(radio => {
+            radio.addEventListener('change', handleAspectRatioChange);
+        });
+        
+        // Size controls
+        elements.widthInput.addEventListener('input', handleSizeInput);
+        elements.heightInput.addEventListener('input', handleSizeInput);
+        elements.maintainAspect.addEventListener('change', toggleAspectRatioLock);
+        
+        // Sliders
+        elements.qualitySlider.addEventListener('input', updateQualityValue);
+        elements.scaleSlider.addEventListener('input', updateScaleValue);
+        elements.brightnessSlider.addEventListener('input', updateBrightnessValue);
+        elements.contrastSlider.addEventListener('input', updateContrastValue);
+        elements.saturationSlider.addEventListener('input', updateSaturationValue);
+        elements.sharpnessSlider.addEventListener('input', updateSharpnessValue);
+        
+        // Panel toggles
+        document.querySelectorAll('.panel-header').forEach(header => {
+            header.addEventListener('click', () => togglePanel(header));
+        });
+        
+        // Theme toggle
+        elements.themeToggle.addEventListener('click', toggleTheme);
+        
+        // Privacy link
+        elements.privacyLink.addEventListener('click', showPrivacyPolicy);
+        
+        // Keyboard shortcuts
+        document.addEventListener('keydown', handleKeyboardShortcuts);
+    }
+
+    // File handling
+    async function handleFileSelect(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        // Check file size (10MB limit)
+        if (file.size > 10 * 1024 * 1024) {
+            showError('File size exceeds 10MB limit');
+            return;
+        }
+        
+        if (!file.type.match('image.*')) {
+            showError('Please select an image file (JPEG, PNG, GIF, etc.)');
+            return;
+        }
+        
+        try {
+            const imageData = await readFileAsDataURL(file);
+            loadImage(imageData);
+            
+            // Store original image dimensions
+            const img = new Image();
+            img.onload = function() {
+                state.originalDimensions = {
+                    width: img.width,
+                    height: img.height
+                };
+                state.cropState.ratio = img.width / img.height;
+                state.lastAspectRatio = state.cropState.ratio;
+                
+                // Update size inputs
+                elements.widthInput.placeholder = img.width;
+                elements.heightInput.placeholder = img.height;
+                
+                // Set custom aspect ratio
+                document.querySelector('input[name="aspectRatio"][value="custom"]').checked = true;
+            };
+            img.src = imageData;
+        } catch (error) {
+            showError('Error loading image: ' + error.message);
+        }
+    }
+
+    function loadImage(imageData) {
+        state.originalImage = imageData;
+        state.currentImage = imageData;
+        elements.previewImage.src = imageData;
+        elements.previewImage.style.display = 'block';
+        elements.emptyState.style.display = 'none';
+        elements.convertBtn.disabled = false;
+        
+        // Initialize cropper if needed
+        if (elements.cropToggle.checked) {
+            initCropper();
+        }
+    }
+
+    function resetImage() {
+        if (state.originalImage) {
+            state.currentImage = state.originalImage;
+            elements.previewImage.src = state.originalImage;
+            
+            if (state.cropState.active) {
+                cancelCrop();
+            }
+        } else {
+            elements.previewImage.style.display = 'none';
+            elements.emptyState.style.display = 'flex';
+            elements.convertBtn.disabled = true;
+        }
+    }
+
+    // Image processing
+    async function processImage() {
+        if (!state.currentImage || state.isProcessing) return;
+        
+        state.isProcessing = true;
+        showProcessingModal();
+        
+        try {
+            // Get conversion settings
+            const settings = getConversionSettings();
+            
+            // Simulate processing steps
+            await simulateProcessing(settings);
+            
+            // Show result
+            showResultModal();
+        } catch (error) {
+            showError('Processing failed: ' + error.message);
+        } finally {
+            state.isProcessing = false;
+        }
+    }
+
+    function getConversionSettings() {
+        return {
+            format: document.querySelector('input[name="format"]:checked').value,
+            quality: parseInt(elements.qualitySlider.value),
+            width: elements.widthInput.value || null,
+            height: elements.heightInput.value || null,
+            scale: parseInt(elements.scaleSlider.value),
+            maintainAspect: elements.maintainAspect.checked,
+            autoEnhance: elements.autoEnhance.checked,
+            style: elements.styleSelect.value,
+            removeBg: elements.removeBg.checked,
+            upscale: elements.upscale.checked,
+            preserveExif: elements.preserveExif.checked,
+            brightness: parseInt(elements.brightnessSlider.value),
+            contrast: parseInt(elements.contrastSlider.value),
+            saturation: parseInt(elements.saturationSlider.value),
+            sharpness: parseInt(elements.sharpnessSlider.value),
+            crop: state.cropState.active ? {
+                x: state.cropState.x,
+                y: state.cropState.y,
+                width: state.cropState.width,
+                height: state.cropState.height
+            } : null
+        };
+    }
+
+    function showProcessingModal() {
+        elements.processingModal.classList.add('active');
+        elements.progressBar.style.width = '0%';
+        elements.progressText.textContent = 'Initializing AI engine...';
+    }
+
+    function updateProgress(percent, message) {
+        elements.progressBar.style.width = `${percent}%`;
+        elements.progressText.textContent = message;
+    }
+
+    async function simulateProcessing(settings) {
+        // Simulate a realistic processing flow with different stages
+        const processingStages = [
+            { percent: 10, message: 'Analyzing image content...', delay: 800 },
+            { percent: 25, message: 'Preparing AI models...', delay: 1200 },
+            { percent: 40, message: 'Applying color adjustments...', delay: 1000 },
+            { percent: 55, message: settings.removeBg ? 'Removing background...' : 'Optimizing composition...', delay: 1500 },
+            { percent: 70, message: settings.style !== 'none' ? `Applying ${settings.style} style...` : 'Enhancing details...', delay: 1800 },
+            { percent: 85, message: settings.upscale ? 'Upscaling image...' : 'Finalizing output...', delay: 1200 },
+            { percent: 95, message: 'Compressing image...', delay: 800 },
+            { percent: 100, message: 'Done!', delay: 500 }
+        ];
+
+        for (const stage of processingStages) {
+            if (!state.isProcessing) break; // Check if processing was cancelled
+            updateProgress(stage.percent, stage.message);
+            await delay(stage.delay);
+        }
+        
+        // In a real app, this would be the actual processed image from your API
+        // For demo purposes, we're just using the original image
+        state.processedImage = state.currentImage;
+    }
+
+    function cancelProcessing() {
+        state.isProcessing = false;
+        elements.processingModal.classList.remove('active');
+        showError('Processing cancelled');
+    }
+
+    function showResultModal() {
+        elements.processingModal.classList.remove('active');
+        elements.resultImage.src = state.processedImage;
+        
+        // Set file info (simulated)
+        const format = document.querySelector('input[name="format"]:checked').value.toUpperCase();
+        elements.fileFormat.textContent = format;
+        elements.fileSize.textContent = calculateFileSize(state.processedImage);
+        
+        // Calculate dimensions (simulated)
+        let width = state.originalDimensions.width;
+        let height = state.originalDimensions.height;
+        
+        if (elements.widthInput.value) {
+            width = parseInt(elements.widthInput.value);
+            if (elements.maintainAspect.checked) {
+                height = Math.round(width / state.lastAspectRatio);
+            }
+        } else if (elements.heightInput.value) {
+            height = parseInt(elements.heightInput.value);
+            if (elements.maintainAspect.checked) {
+                width = Math.round(height * state.lastAspectRatio);
+            }
+        } else if (parseInt(elements.scaleSlider.value) !== 100) {
+            const scale = parseInt(elements.scaleSlider.value) / 100;
+            width = Math.round(width * scale);
+            height = Math.round(height * scale);
+        }
+        
+        if (state.cropState.active) {
+            // Simulate cropped dimensions
+            width = Math.round(state.cropState.width);
+            height = Math.round(state.cropState.height);
+        }
+        
+        elements.fileDimensions.textContent = `${width}×${height}`;
+        
+        elements.downloadModal.classList.add('active');
+    }
+
+    function downloadImage() {
+        if (!state.processedImage) return;
+        
+        const format = document.querySelector('input[name="format"]:checked').value;
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const filename = `ai-converted-${timestamp}.${format}`;
+        
+        downloadFile(state.processedImage, filename);
+    }
+
+    function resetAfterConversion() {
+        elements.downloadModal.classList.remove('active');
+    }
+
+    // Crop functionality
+    function toggleCropMode() {
+        state.cropState.active = elements.cropToggle.checked;
+        
+        if (state.cropState.active) {
+            initCropper();
+        } else {
+            destroyCropper();
+        }
+    }
+
+    function initCropper() {
+        if (!state.currentImage) return;
+        
+        elements.cropContainer.style.display = 'block';
+        elements.cropPreview.src = state.currentImage;
+        
+        // In a real app, you would initialize a cropper library here
+        console.log('Initializing cropper...');
+        
+        // For demo purposes, we'll just show the UI and simulate crop values
+        state.cropState = {
+            active: true,
+            x: 0,
+            y: 0,
+            width: Math.round(state.originalDimensions.width * 0.8),
+            height: Math.round(state.originalDimensions.height * 0.8),
+            ratio: state.lastAspectRatio
+        };
+    }
+
+    function destroyCropper() {
+        elements.cropContainer.style.display = 'none';
+        state.cropState.active = false;
+    }
+
+    function applyCrop() {
+        // In a real app, this would apply the actual crop to the image
+        console.log('Applying crop:', state.cropState);
+        
+        // For demo, we'll just update the preview
+        elements.previewImage.src = state.currentImage;
+        destroyCropper();
+        elements.cropToggle.checked = false;
+    }
+
+    function cancelCrop() {
+        destroyCropper();
+        elements.cropToggle.checked = false;
+    }
+
+    function handleAspectRatioChange(e) {
+        const ratio = e.target.value;
+        
+        if (ratio === 'custom') {
+            state.lastAspectRatio = state.cropState.ratio;
+            return;
+        }
+        
+        const [w, h] = ratio.split(':').map(Number);
+        state.lastAspectRatio = w / h;
+        
+        // Update crop dimensions maintaining aspect ratio
+        if (state.cropState.active) {
+            state.cropState.height = Math.round(state.cropState.width / state.lastAspectRatio);
+        }
+    }
+
+    // Size controls
+    function handleSizeInput(e) {
+        if (!state.aspectRatioLocked) return;
+        
+        const target = e.target.id;
+        const value = parseInt(e.target.value) || 0;
+        
+        if (target === 'width' && value > 0) {
+            const newHeight = Math.round(value / state.lastAspectRatio);
+            elements.heightInput.value = newHeight;
+        } else if (target === 'height' && value > 0) {
+            const newWidth = Math.round(value * state.lastAspectRatio);
+            elements.widthInput.value = newWidth;
+        }
+    }
+
+    function toggleAspectRatioLock() {
+        state.aspectRatioLocked = elements.maintainAspect.checked;
+    }
+
+    // UI updates
+    function updateQualityValue() {
+        elements.qualityValue.textContent = elements.qualitySlider.value;
+    }
+
+    function updateScaleValue() {
+        elements.scaleValue.textContent = elements.scaleSlider.value;
+    }
+
+    function updateBrightnessValue() {
+        elements.brightnessValue.textContent = elements.brightnessSlider.value;
+    }
+
+    function updateContrastValue() {
+        elements.contrastValue.textContent = elements.contrastSlider.value;
+    }
+
+    function updateSaturationValue() {
+        elements.saturationValue.textContent = elements.saturationSlider.value;
+    }
+
+    function updateSharpnessValue() {
+        elements.sharpnessValue.textContent = elements.sharpnessSlider.value;
+    }
+
+    function togglePanel(header) {
+        const panelId = header.getAttribute('data-panel');
+        const panelContent = document.getElementById(`${panelId}Panel`);
+        const arrow = header.querySelector('.panel-arrow');
+        
+        header.classList.toggle('active');
+        panelContent.classList.toggle('open');
+    }
+
+    // Drag and drop handlers
+    function handleDragOver(e) {
+        e.preventDefault();
+        elements.dropZone.classList.add('drag-over');
+    }
+
+    function handleDragLeave() {
+        elements.dropZone.classList.remove('drag-over');
+    }
+
+    function handleDrop(e) {
+        e.preventDefault();
+        elements.dropZone.classList.remove('drag-over');
+        
+        if (e.dataTransfer.files.length) {
+            elements.fileInput.files = e.dataTransfer.files;
+            handleFileSelect({ target: elements.fileInput });
+        }
+    }
+
+    // Theme management
+    function toggleTheme() {
+        state.theme = state.theme === 'light' ? 'dark' : 'light';
+        localStorage.setItem('theme', state.theme);
+        applyTheme();
+    }
+
+    function applyTheme() {
+        document.documentElement.setAttribute('data-theme', state.theme);
+        
+        if (state.theme === 'dark') {
+            elements.themeToggle.innerHTML = '<i class="fas fa-sun"></i><span>Light Mode</span>';
+        } else {
+            elements.themeToggle.innerHTML = '<i class="fas fa-m
